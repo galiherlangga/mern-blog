@@ -1,3 +1,4 @@
+import React from "react";
 import { Link } from "react-router-dom";
 
 const Navbar = () => {
@@ -17,7 +18,7 @@ const Navbar = () => {
             </Link>
           </li>
           <li className="inline-block pt-4 pb-4 w-1/4">
-            <Link to="/articles" className="pl-6 pr-8">
+            <Link to="/article" className="pl-6 pr-8">
               Articles
             </Link>
           </li>
