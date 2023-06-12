@@ -2,7 +2,12 @@ const express = require("express");
 const app = express();
 const port = process.env.PORT || 8000;
 
-const { connectToDB, getArticleCollection } = require("./db");
+const {
+  connectToDB,
+  getArticleCollection,
+  getCommentCollection,
+} = require("./db");
+const { ObjectId } = require("mongodb");
 
 // Initialize middleware
 // parse JSON body payload
@@ -23,8 +28,18 @@ app.get("/api/articles", async (req, res) => {
 app.get("/api/articles/:slug", async (req, res) => {
   try {
     const articleCollection = getArticleCollection();
-    const articles = await articleCollection.find(req.params.slug).toArray();
-    res.json(articles);
+    const commentCollection = getCommentCollection();
+
+    const article = await articleCollection.findOne({ slug: req.params.slug });
+    if (article) {
+      const comments = await commentCollection
+        .find({ articleId: article._id })
+        .toArray();
+      article.comments = comments;
+      res.json(article);
+    } else {
+      res.status(404).json({ message: "Article not found" });
+    }
   } catch (error) {
     console.error("Error retrieving articles:", error);
     res.status(500).json({ error: "Failed to retrieve articles" });
@@ -55,18 +70,28 @@ app.post("/api/articles", async (req, res) => {
       tagList: articleData.tagList,
       favorited: articleData.favorited || false,
       favoritesCount: articleData.favoritesCount || 0,
-      comments: articleData.comments || [],
     };
     // Assuming you have the article collection available from your MongoDB connection
     const articleCollection = getArticleCollection();
+    const commentCollection = getCommentCollection();
 
     articleCollection
       .insertOne(article)
       .then((result) => {
         const insertedArticleObjectId = result.insertedId;
-  
+
+        // Insert the comments
+        const comments = articleData.comments.map((comment) => {
+          return {
+            articleId: insertedArticleObjectId,
+            body: comment.body,
+            author: comment.author,
+          };
+        });
+        commentCollection.insertMany(comments);
+
         // Retrieve the inserted article from the collection by objectId
-        return articleCollection.findOne({ _id: insertedArticleObjectId });
+        res.json(articleCollection.findOne({ _id: insertedArticleObjectId }));
       })
       .then((insertedArticle) => {
         res.json(insertedArticle);
@@ -90,14 +115,93 @@ app.post("/api/articles", async (req, res) => {
  *  }
  * }
  */
-app.post("/api/articles/:slug/comments", (req, res) => {
-  const article = articles[req.params.slug];
-  if (article) {
-    const comment = req.body.comment;
-    article.comments.push(comment);
-    res.json(article);
-  } else {
-    res.status(404).json({ message: "Article not found" });
+app.post("/api/articles/:slug/comments", async (req, res) => {
+  try {
+    const articleCollection = getArticleCollection();
+    const commentCollection = getCommentCollection();
+    // Find the article by slug
+    const article = await articleCollection.findOne({ slug: req.params.slug });
+    if (article) {
+      // Create a new comment object
+      const comment = {
+        articleId: article._id,
+        body: req.body.comment.body,
+        author: req.body.comment.author,
+      };
+      // Insert the comment into the comments collection
+      commentCollection.insertOne(comment)
+      .then(() => {
+        // Return success response with the inserted comment
+        res.json({message: "Comment created successfully"});
+      })
+      .catch((error) => {
+        console.error("Failed to insert comment:", error);
+        res.status(500).json({ message: "Failed to create comment" });
+      });
+    } else {
+      res.status(404).json({ message: "Article not found" });
+    }
+  } catch (error) {
+    console.error("Error creating comment:", error);
+    res.status(500).json({ error: "Failed to create comment" });
+  }
+});
+
+// Delete comment
+app.delete("/api/articles/:slug/comments/:id", async (req, res) => {
+  try {
+    const articleCollection = getArticleCollection();
+    const commentCollection = getCommentCollection();
+    // Find the article by slug
+    const article = await articleCollection.findOne({ slug: req.params.slug });
+    console.log(req.params.id);
+    if (article) {
+      // find comment by objectId
+      const comment = await commentCollection.findOne({
+        _id: new ObjectId(req.params.id),
+        articleId: article._id,
+      });
+      if (comment) {
+        // Delete the comment from the comments collection
+        await commentCollection.deleteOne({ _id: comment._id });
+
+        // Remove the comment from the article's comments array
+        const updatedArticle = await articleCollection.findOneAndUpdate(
+          { _id: article._id },
+          { $pull: { comments: { _id: comment._id } } },
+          { returnOriginal: false }
+        );
+
+        res.json(updatedArticle.value);
+      }
+    } else {
+      res.status(404).json({ message: "Article not found" });
+    }
+  } catch (error) {
+    console.error("Error deleting comment:", error);
+    res.status(500).json({ error: "Failed to delete comment" });
+  }
+});
+
+// Delete article
+app.delete("/api/articles/:slug", async (req, res) => {
+  try {
+    const articleCollection = getArticleCollection();
+    const commentCollection = getCommentCollection();
+    // Find the article by slug
+    const article = await articleCollection.findOne({ slug: req.params.slug });
+    if (article) {
+      // Delete the article from the articles collection
+      await articleCollection.deleteOne({ _id: article._id });
+      // Delete the comments from the comments collection
+      await commentCollection.deleteMany({ articleId: article._id });
+      res.json({ message: "Article deleted" });
+    } else {
+      res.status(404).json({ message: "Article not found" });
+    }
+  } catch (error) {
+    console.error("Error deleting article:", error);
+    res.status(500).json({ error: "Failed to delete article" });
   }
 });
 
