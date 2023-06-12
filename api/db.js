@@ -21,7 +21,15 @@ function getArticleCollection() {
   return db.collection('article');
 }
 
+function getCommentCollection() {
+  if (!db) {
+    throw new Error('Database connection not established');
+  }
+  return db.collection('comment');
+}
+
 module.exports = {
   connectToDB,
   getArticleCollection,
+  getCommentCollection,
 };
